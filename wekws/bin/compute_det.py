@@ -63,6 +63,10 @@ if __name__ == '__main__':
     parser.add_argument('--stats_file',
                         required=True,
                         help='false reject/alarm stats file')
+    parser.add_argument('--threshold_lower', type=float, default=0,
+                        help='lower bound of threshold')
+    parser.add_argument('--threshold_upper', type=float, default=1.0,
+                        help='upper bound of threshold')
     args = parser.parse_args()
     window_shift = args.window_shift
     keyword_table, filler_table, filler_duration = load_label_and_score(
@@ -74,11 +78,12 @@ if __name__ == '__main__':
         keyword_table[key] = max(score_list)
     # auxiliary variable for skipping traverse on some negative samples
     _filler_table_max = {key: max(score_list) for key, score_list in filler_table.items()}
+    threshold_lower, threshold_upper = args.threshold_lower, args.threshold_upper
 
     with open(args.stats_file, 'w', encoding='utf8') as fout:
         keyword_index = int(args.keyword)
-        threshold = 0.0
-        while threshold <= 1.0:
+        threshold = threshold_lower
+        while threshold <= threshold_upper:
             # transverse the all keyword_table
             num_false_reject = sum(1 for key, score in keyword_table.items() if score < threshold)
             
