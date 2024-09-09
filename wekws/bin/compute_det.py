@@ -72,6 +72,7 @@ if __name__ == '__main__':
     # preprocess the score_table to avoid unnecessary traverse
     for key, score_list in keyword_table.items():
         keyword_table[key] = max(score_list)
+    
     # auxiliary variable for skipping traverse on some negative samples
     _filler_table_max = {key: max(score_list) for key, score_list in filler_table.items()}
 
