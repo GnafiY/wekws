@@ -68,28 +68,22 @@ if __name__ == '__main__':
     keyword_table, filler_table, filler_duration = load_label_and_score(
         args.keyword, args.test_data, args.score_file)
     print('Filler total duration Hours: {}'.format(filler_duration / 3600.0))
-
-    # preprocess the score_table to avoid unnecessary traverse
-    for key, score_list in keyword_table.items():
-        keyword_table[key] = max(score_list)
-    # auxiliary variable for skipping traverse on some negative samples
-    _filler_table_max = {key: max(score_list) for key, score_list in filler_table.items()}
-
     with open(args.stats_file, 'w', encoding='utf8') as fout:
         keyword_index = int(args.keyword)
         threshold = 0.0
         while threshold <= 1.0:
+            num_false_reject = 0
             # transverse the all keyword_table
-            num_false_reject = sum(1 for key, score in keyword_table.items() if score < threshold)
-            
-            # transverse the all filler_table
+            for key, score_list in keyword_table.items():
+                # computer positive test sample, use the max score of list.
+                score = max(score_list)
+                if float(score) < threshold:
+                    num_false_reject += 1
             num_false_alarm = 0
+            # transverse the all filler_table
             for key, score_list in filler_table.items():
                 i = 0
                 while i < len(score_list):
-                    # skip unnecessary traverse on negative samples, which costs a lot of unnecessary time in my case
-                    if _filler_table_max[key] < threshold:
-                        continue
                     if score_list[i] >= threshold:
                         num_false_alarm += 1
                         i += window_shift
