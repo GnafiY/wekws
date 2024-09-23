@@ -8,13 +8,15 @@ stage=0
 stop_stage=4
 num_keywords=1
 
-config=conf/ds_tcn.yaml
+model_name=mdtc_small
+
+config=conf/${model_name}.yaml
 norm_mean=true
 norm_var=true
 gpus="0"
 
 checkpoint=
-dir=exp/ds_tcn
+dir=exp/${model_name}
 
 num_average=30
 score_checkpoint=$dir/avg_${num_average}.pt
@@ -87,20 +89,30 @@ fi
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
   echo "Do model average, Compute FRR/FAR ..."
-  python wekws/bin/average_model.py \
-    --dst_model $score_checkpoint \
-    --src_path $dir  \
-    --num ${num_average} \
-    --val_best
+  if [ -f "${score_checkpoint}" ]; then
+    echo "Using $score_checkpoint for scoring"
+  else
+    echo "$score_checkpoint not found, doing model average"
+    python wekws/bin/average_model.py \
+      --dst_model $score_checkpoint \
+      --src_path $dir  \
+      --num ${num_average} \
+      --val_best
+  fi
+
   result_dir=$dir/test_$(basename $score_checkpoint)
-  mkdir -p $result_dir
-  python wekws/bin/score.py \
-    --config $dir/config.yaml \
-    --test_data data/test/data.list \
-    --batch_size 256 \
-    --checkpoint $score_checkpoint \
-    --score_file $result_dir/score.txt \
-    --num_workers 8
+  if [ -e "${result_dir}" ] && [ -s "${result_dir}/score.txt" ]; then
+    echo "${result_dir}/score.txt already exists, skipping scoring"
+  else
+    mkdir -p $result_dir
+    python wekws/bin/score.py \
+      --config $dir/config.yaml \
+      --test_data data/test/data.list \
+      --batch_size 256 \
+      --checkpoint $score_checkpoint \
+      --score_file $result_dir/score.txt \
+      --num_workers 8
+  fi
   first_keyword=0
   last_keyword=$(($num_keywords+$first_keyword-1))
   for keyword in $(seq $first_keyword $last_keyword); do

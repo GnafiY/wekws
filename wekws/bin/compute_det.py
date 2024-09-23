@@ -15,7 +15,8 @@
 
 import argparse
 import json
-
+import numpy as np
+from tqdm import tqdm
 
 def load_label_and_score(keyword, label_file, score_file):
     # score_table: {uttid: [keywordlist]}
@@ -82,19 +83,21 @@ if __name__ == '__main__':
 
     with open(args.stats_file, 'w', encoding='utf8') as fout:
         keyword_index = int(args.keyword)
-        threshold = threshold_lower
-        while threshold <= threshold_upper:
+        thresholds = np.arange(threshold_lower, threshold_upper + args.step, args.step)
+        for threshold in tqdm(thresholds):
+        # while threshold <= threshold_upper:
             # transverse the all keyword_table
             num_false_reject = sum(1 for key, score in keyword_table.items() if score < threshold)
             
             # transverse the all filler_table
             num_false_alarm = 0
             for key, score_list in filler_table.items():
+                # skip unnecessary traverse on negative samples, which costs a lot of unnecessary time in my case
+                if _filler_table_max[key] < threshold:
+                    continue
+                # traverse the score_list
                 i = 0
                 while i < len(score_list):
-                    # skip unnecessary traverse on negative samples, which costs a lot of unnecessary time in my case
-                    if _filler_table_max[key] < threshold:
-                        continue
                     if score_list[i] >= threshold:
                         num_false_alarm += 1
                         i += window_shift
@@ -109,4 +112,4 @@ if __name__ == '__main__':
             fout.write('{:.6f} {:.6f} {:.6f}\n'.format(threshold,
                                                        false_alarm_per_hour,
                                                        false_reject_rate))
-            threshold += args.step
+            # threshold += args.step
