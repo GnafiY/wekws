@@ -72,14 +72,6 @@ def get_args():
                         type=str,
                         default=None,
                         help='the keywords, split with comma(,)')
-    parser.add_argument('--token_file',
-                        type=str,
-                        default=None,
-                        help='the path of tokens.txt')
-    parser.add_argument('--lexicon_file',
-                        type=str,
-                        default=None,
-                        help='the path of lexicon.txt')
 
     args = parser.parse_args()
     return args

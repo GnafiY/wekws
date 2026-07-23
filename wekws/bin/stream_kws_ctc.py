@@ -30,7 +30,7 @@ import yaml
 from collections import defaultdict
 from wekws.model.kws_model import init_model
 from wekws.utils.checkpoint import load_checkpoint
-from tools.make_list import query_token_set, read_lexicon, read_token
+from wenet.text.char_tokenizer import CharTokenizer
 
 
 def get_args():
@@ -62,14 +62,10 @@ def get_args():
                         type=str,
                         default=None,
                         help='the keywords, split with comma(,)')
-    parser.add_argument('--token_file',
+    parser.add_argument('--dict',
                         type=str,
-                        default=None,
-                        help='the path of tokens.txt')
-    parser.add_argument('--lexicon_file',
-                        type=str,
-                        default=None,
-                        help='the path of lexicon.txt')
+                        default='./dict',
+                        help='dict dir containing dict.txt and words.txt')
     parser.add_argument('--score_beam_size',
                         default=3,
                         type=int,
@@ -221,8 +217,7 @@ class KeyWordSpotter(torch.nn.Module):
         self,
         ckpt_path,
         config_path,
-        token_path,
-        lexicon_path,
+        dict_dir,
         threshold,
         min_frames=5,
         max_frames=250,
@@ -275,12 +270,11 @@ class KeyWordSpotter(torch.nn.Module):
         self.model = model.to(device)
         self.model.eval()
         logging.info(f'model {ckpt_path} loaded.')
-        self.token_table = read_token(token_path)
-        logging.info(f'tokens {token_path} with '
-                     f'{len(self.token_table)} units loaded.')
-        self.lexicon_table = read_lexicon(lexicon_path)
-        logging.info(f'lexicons {lexicon_path} with '
-                     f'{len(self.lexicon_table)} units loaded.')
+        self.tokenizer = CharTokenizer(f'{dict_dir}/dict.txt',
+                                       f'{dict_dir}/words.txt',
+                                       unk='<filler>',
+                                       split_with_space=True)
+        logging.info(f'tokenizer loaded from {dict_dir}.')
         self.in_cache = torch.zeros(0, 0, 0, dtype=torch.float)
 
         # decoding and detection related
@@ -313,8 +307,9 @@ class KeyWordSpotter(torch.nn.Module):
         keywords_strset = {'<blk>'}
         keywords_tokenmap = {'<blk>': 0}
         for keyword in keywords_list:
-            strs, indexes = query_token_set(keyword, self.token_table,
-                                            self.lexicon_table)
+            strs, indexes = self.tokenizer.tokenize(
+                ' '.join(list(keyword)))
+            indexes = tuple(indexes)
             keywords_token[keyword] = {}
             keywords_token[keyword]['token_id'] = indexes
             keywords_token[keyword]['token_str'] = ''.join('%s ' % str(i)
@@ -534,8 +529,8 @@ def demo():
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
 
-    kws = KeyWordSpotter(args.checkpoint, args.config, args.token_file,
-                         args.lexicon_file, args.threshold, args.min_frames,
+    kws = KeyWordSpotter(args.checkpoint, args.config, args.dict,
+                         args.threshold, args.min_frames,
                          args.max_frames, args.interval_frames,
                          args.score_beam_size, args.path_beam_size, args.gpu,
                          args.jit_model)
@@ -579,7 +574,7 @@ def demo():
                 #     assert fin.getnchannels() == 1
                 #     wav = fin.readframes(fin.getnframes())
 
-                y, _ = librosa.load(args.wav_path, sr=16000, mono=True)
+                y, _ = librosa.load(wav_path, sr=16000, mono=True)
                 # NOTE: model supports 16k sample_rate
                 wav = (y * (1 << 15)).astype("int16").tobytes()
 

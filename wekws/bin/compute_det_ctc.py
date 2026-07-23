@@ -166,14 +166,6 @@ if __name__ == '__main__':
     parser.add_argument('--dict', default='./dict', help='dict dir')
     parser.add_argument('--keywords', type=str, default=None,
                         help='keywords, split with comma(,)')
-    parser.add_argument('--token_file',
-                        type=str,
-                        default=None,
-                        help='the path of tokens.txt')
-    parser.add_argument('--lexicon_file',
-                        type=str,
-                        default=None,
-                        help='the path of lexicon.txt')
     parser.add_argument('--score_file', required=True, help='score file')
     parser.add_argument('--step',
                         type=float,
