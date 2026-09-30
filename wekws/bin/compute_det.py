@@ -27,7 +27,7 @@ def load_label_and_score(keyword, label_file, score_file):
             key = arr[0]
             current_keyword = arr[1]
             str_list = arr[2:]
-            if int(current_keyword) == keyword:
+            if current_keyword == keyword:
                 scores = list(map(float, str_list))
                 if key not in score_table:
                     score_table.update({key: scores})
@@ -41,10 +41,10 @@ def load_label_and_score(keyword, label_file, score_file):
             assert 'txt' in obj
             assert 'duration' in obj
             key = obj['key']
-            index = obj['txt']
+            txt = obj['txt'].upper()
             duration = obj['duration']
-            assert key in score_table
-            if index == keyword:
+            assert key in score_table, f'key: {key} not found'
+            if txt == keyword:
                 keyword_table[key] = score_table[key]
             else:
                 filler_table[key] = score_table[key]
@@ -55,12 +55,17 @@ def load_label_and_score(keyword, label_file, score_file):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='compute det curve')
     parser.add_argument('--test_data', required=True, help='label file')
-    parser.add_argument('--keyword', type=int, default=0, help='keyword label')
+    parser.add_argument('--keyword', required=True, help='keyword label')
     parser.add_argument('--score_file', required=True, help='score file')
-    parser.add_argument('--step', type=float, default=0.01,
+    parser.add_argument('--step',
+                        type=float,
+                        default=0.01,
                         help='threshold step')
-    parser.add_argument('--window_shift', type=int, default=50,
-                        help='window_shift is used to skip the frames after triggered')
+    parser.add_argument(
+        '--window_shift',
+        type=int,
+        default=50,
+        help='window_shift is used to skip the frames after triggered')
     parser.add_argument('--stats_file',
                         required=True,
                         help='false reject/alarm stats file')
@@ -85,7 +90,7 @@ if __name__ == '__main__':
         keyword_index = int(args.keyword)
         thresholds = np.arange(threshold_lower, threshold_upper + args.step, args.step)
         for threshold in tqdm(thresholds):
-        # while threshold <= threshold_upper:
+            num_false_reject = 0
             # transverse the all keyword_table
             num_false_reject = sum(1 for key, score in keyword_table.items() if score < threshold)
             

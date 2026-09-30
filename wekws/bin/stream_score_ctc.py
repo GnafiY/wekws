@@ -28,16 +28,17 @@ import yaml
 from collections import defaultdict
 from torch.utils.data import DataLoader
 
-from wekws.dataset.dataset import Dataset
+from wekws.dataset.init_dataset import init_dataset
 from wekws.model.kws_model import init_model
 from wekws.utils.checkpoint import load_checkpoint
-from tools.make_list import query_token_set, read_lexicon, read_token
+from wenet.text.char_tokenizer import CharTokenizer
 
 
 def get_args():
     parser = argparse.ArgumentParser(description='recognize with your model')
     parser.add_argument('--config', required=True, help='config file')
     parser.add_argument('--test_data', required=True, help='test data file')
+    parser.add_argument('--dict', default='./dict', help='dict dir')
     parser.add_argument('--gpu',
                         type=int,
                         default=-1,
@@ -66,28 +67,26 @@ def get_args():
                         action='store_true',
                         default=False,
                         help='Use pinned memory buffers used for reading')
-    parser.add_argument('--keywords', type=str, default=None,
+    parser.add_argument('--keywords',
+                        type=str,
+                        default=None,
                         help='the keywords, split with comma(,)')
-    parser.add_argument('--token_file', type=str, default=None,
-                        help='the path of tokens.txt')
-    parser.add_argument('--lexicon_file', type=str, default=None,
-                        help='the path of lexicon.txt')
     parser.add_argument('--score_beam_size',
                         default=3,
                         type=int,
                         help='The first prune beam, f'
-                             'ilter out those frames with low scores.')
+                        'ilter out those frames with low scores.')
     parser.add_argument('--path_beam_size',
                         default=20,
                         type=int,
                         help='The second prune beam, '
-                             'keep only path_beam_size candidates.')
+                        'keep only path_beam_size candidates.')
     parser.add_argument('--threshold',
                         type=float,
                         default=0.0,
                         help='The threshold of kws. '
-                             'If ctc_search probs exceed this value,'
-                             'the keyword will be activated.')
+                        'If ctc_search probs exceed this value,'
+                        'the keyword will be activated.')
     parser.add_argument('--min_frames',
                         default=5,
                         type=int,
@@ -123,7 +122,7 @@ def main():
     args = get_args()
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    torch.cuda.set_device(args.gpu)
 
     with open(args.config, 'r') as fin:
         configs = yaml.load(fin, Loader=yaml.FullLoader)
@@ -131,15 +130,26 @@ def main():
     test_conf = copy.deepcopy(configs['dataset_conf'])
     test_conf['filter_conf']['max_length'] = 102400
     test_conf['filter_conf']['min_length'] = 0
+    test_conf['filter_conf']['token_max_length'] = 10240
+    test_conf['filter_conf']['token_min_length'] = 1
+    test_conf['filter_conf']['min_output_input_ratio'] = 1e-6
+    test_conf['filter_conf']['max_output_input_ratio'] = 1
     test_conf['speed_perturb'] = False
     test_conf['spec_aug'] = False
     test_conf['shuffle'] = False
-    test_conf['feature_extraction_conf']['dither'] = 0.0
+    feats_type = test_conf.get('feats_type', 'fbank')
+    test_conf[f'{feats_type}_conf']['dither'] = 0.0
     test_conf['batch_conf']['batch_size'] = args.batch_size
 
     downsampling_factor = test_conf.get('frame_skip', 1)
 
-    test_dataset = Dataset(args.test_data, test_conf)
+    tokenizer = CharTokenizer(f'{args.dict}/dict.txt',
+                              f'{args.dict}/words.txt',
+                              unk='<filler>',
+                              split_with_space=True)
+    test_dataset = init_dataset(data_list_file=args.test_data,
+                                conf=test_conf, tokenizer=tokenizer,
+                                split='test')
     test_data_loader = DataLoader(test_dataset,
                                   batch_size=None,
                                   pin_memory=args.pin_memory,
@@ -160,8 +170,6 @@ def main():
     model.eval()
     score_abs_path = os.path.abspath(args.score_file)
 
-    token_table = read_token(args.token_file)
-    lexicon_table = read_lexicon(args.lexicon_file)
     # 4. parse keywords tokens
     assert args.keywords is not None, 'at least one keyword is needed'
     logging.info(f"keywords is {args.keywords}, "
@@ -173,7 +181,8 @@ def main():
     keywords_strset = {'<blk>'}
     keywords_tokenmap = {'<blk>': 0}
     for keyword in keywords_list:
-        strs, indexes = query_token_set(keyword, token_table, lexicon_table)
+        strs, indexes = tokenizer.tokenize(' '.join(list(keyword)))
+        indexes = tuple(indexes)
         keywords_token[keyword] = {}
         keywords_token[keyword]['token_id'] = indexes
         keywords_token[keyword]['token_str'] = ''.join('%s ' % str(i)
@@ -190,8 +199,12 @@ def main():
     logging.info(f'Token set is: {token_print}')
 
     with torch.no_grad(), open(score_abs_path, 'w', encoding='utf8') as fout:
-        for batch_idx, batch in enumerate(test_data_loader):
-            keys, feats, target, lengths, target_lengths = batch
+        for batch_idx, batch_dict in enumerate(test_data_loader):
+            keys = batch_dict['keys']
+            feats = batch_dict['feats']
+            targets = batch_dict['target'][:, 0]
+            lengths = batch_dict['feats_lengths']
+            label_lengths = batch_dict['target_lengths']
             feats = feats.to(device)
             lengths = lengths.to(device)
             logits, _ = model(feats)
@@ -215,7 +228,7 @@ def main():
                 # 2. CTC beam search step by step
                 for t in range(0, maxlen):
                     probs = ctc_probs[t]  # (vocab_size,)
-                    t *= downsampling_factor   # the real time
+                    t *= downsampling_factor  # the real time
                     # key: prefix, value (pb, pnb), default value(-inf, -inf)
                     next_hyps = defaultdict(lambda: (0.0, 0.0, []))
 
@@ -225,8 +238,8 @@ def main():
                     # filter prob score that is too small
                     filter_probs = []
                     filter_index = []
-                    for prob, idx in zip(
-                            top_k_probs.tolist(), top_k_index.tolist()):
+                    for prob, idx in zip(top_k_probs.tolist(),
+                                         top_k_index.tolist()):
                         if keywords_idxset is not None:
                             if prob > 0.05 and idx in keywords_idxset:
                                 filter_probs.append(prob)
@@ -250,7 +263,8 @@ def main():
                                 nodes = cur_nodes.copy()
                                 next_hyps[prefix] = (n_pb, n_pnb, nodes)
                             elif s == last:
-                                if not math.isclose(pnb, 0.0, abs_tol=0.000001):
+                                if not math.isclose(pnb, 0.0,
+                                                    abs_tol=0.000001):
                                     # Update *ss -> *s;
                                     n_pb, n_pnb, nodes = next_hyps[prefix]
                                     n_pnb = n_pnb + pnb * ps
@@ -263,15 +277,15 @@ def main():
 
                                 if not math.isclose(pb, 0.0, abs_tol=0.000001):
                                     # Update *s-s -> *ss, - is for blank
-                                    n_prefix = prefix + (s,)
+                                    n_prefix = prefix + (s, )
                                     n_pb, n_pnb, nodes = next_hyps[n_prefix]
                                     n_pnb = n_pnb + pb * ps
                                     nodes = cur_nodes.copy()
-                                    nodes.append(dict(
-                                        token=s, frame=t, prob=ps))
+                                    nodes.append(
+                                        dict(token=s, frame=t, prob=ps))
                                     next_hyps[n_prefix] = (n_pb, n_pnb, nodes)
                             else:
-                                n_prefix = prefix + (s,)
+                                n_prefix = prefix + (s, )
                                 n_pb, n_pnb, nodes = next_hyps[n_prefix]
                                 if nodes:
                                     # update frame and prob
@@ -280,19 +294,19 @@ def main():
                                         # nodes[-1]['frame'] = t
                                         # avoid change other beam has this node.
                                         nodes.pop()
-                                        nodes.append(dict(
-                                            token=s, frame=t, prob=ps))
+                                        nodes.append(
+                                            dict(token=s, frame=t, prob=ps))
                                 else:
                                     nodes = cur_nodes.copy()
-                                    nodes.append(dict(
-                                        token=s, frame=t, prob=ps))
+                                    nodes.append(
+                                        dict(token=s, frame=t, prob=ps))
                                 n_pnb = n_pnb + pb * ps + pnb * ps
                                 next_hyps[n_prefix] = (n_pb, n_pnb, nodes)
 
                     # 2.2 Second beam prune
-                    next_hyps = sorted(
-                        next_hyps.items(),
-                        key=lambda x: (x[1][0] + x[1][1]), reverse=True)
+                    next_hyps = sorted(next_hyps.items(),
+                                       key=lambda x: (x[1][0] + x[1][1]),
+                                       reverse=True)
 
                     cur_hyps = next_hyps[:args.path_beam_size]
 
@@ -310,8 +324,8 @@ def main():
                             if offset != -1:
                                 hit_keyword = word
                                 start = prefix_nodes[offset]['frame']
-                                end = prefix_nodes[
-                                    offset + len(lab) - 1]['frame']
+                                end = prefix_nodes[offset + len(lab) -
+                                                   1]['frame']
                                 for idx in range(offset, offset + len(lab)):
                                     hit_score *= prefix_nodes[idx]['prob']
                                 break

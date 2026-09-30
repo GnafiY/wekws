@@ -4,8 +4,10 @@
 
 . ./path.sh
 
-stage=0
-stop_stage=4
+set -euo pipefail
+
+stage=$1
+stop_stage=$2
 num_keywords=1
 
 model_name=mdtc_small
@@ -26,8 +28,7 @@ noise_lmdb=
 reverb_lmdb=
 
 . tools/parse_options.sh || exit 1;
-
-set -euo pipefail
+window_shift=50
 
 if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
   echo "Extracte all datasets"
@@ -38,14 +39,15 @@ fi
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
   echo "Preparing datasets..."
   mkdir -p dict
-  echo "<filler> -1" > dict/words.txt
-  echo "Hey_Snips 0" >> dict/words.txt
+  echo "<FILLER> -1" > dict/dict.txt
+  echo "<HEY_SNIPS> 0" >> dict/dict.txt
+  awk '{print $1}' dict/dict.txt > dict/words.txt
 
   for folder in train dev test; do
     mkdir -p data/$folder
     json_path=$download_dir/hey_snips_research_6k_en_train_eval_clean_ter/$folder.json
     local/prepare_data.py $download_dir/hey_snips_research_6k_en_train_eval_clean_ter/audio_files $json_path \
-      data/$folder
+      dict/dict.txt data/$folder
   done
 fi
 
@@ -80,7 +82,8 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     --num_workers 8 \
     --num_keywords $num_keywords \
     --min_duration 50 \
-    --seed 777 \
+    --seed 666 \
+    --dict ./dict \
     $cmvn_opts \
     ${reverb_lmdb:+--reverb_lmdb $reverb_lmdb} \
     ${noise_lmdb:+--noise_lmdb $noise_lmdb} \
@@ -101,6 +104,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
   fi
 
   result_dir=$dir/test_$(basename $score_checkpoint)
+<<<<<<< HEAD
   if [ -e "${result_dir}" ] && [ -s "${result_dir}/score.txt" ]; then
     echo "${result_dir}/score.txt already exists, skipping scoring"
   else
@@ -116,14 +120,29 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
   first_keyword=0
   last_keyword=$(($num_keywords+$first_keyword-1))
   for keyword in $(seq $first_keyword $last_keyword); do
+=======
+  mkdir -p $result_dir
+  python wekws/bin/score.py \
+    --config $dir/config.yaml \
+    --test_data data/test/data.list \
+    --gpu 0 \
+    --batch_size 256 \
+    --checkpoint $score_checkpoint \
+    --score_file $result_dir/score.txt \
+    --dict ./dict \
+    --num_workers 8
+
+  for keyword in `tail -n +2 dict/words.txt`; do
+>>>>>>> 6a45aeb994dd81c0969ff877a5a7c46d60ed0c86
     python wekws/bin/compute_det.py \
       --keyword $keyword \
       --test_data data/test/data.list \
+      --window_shift $window_shift \
       --score_file $result_dir/score.txt \
       --stats_file $result_dir/stats.${keyword}.txt
   done
   python wekws/bin/plot_det_curve.py \
-    --keywords_dict dict/words.txt \
+    --keywords_dict dict/dict.txt \
     --stats_dir $result_dir \
     --figure_file $result_dir/det.png \
     --xlim 10 \

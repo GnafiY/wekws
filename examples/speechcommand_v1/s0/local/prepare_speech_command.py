@@ -16,9 +16,13 @@
 import os
 import argparse
 
-CLASSES = 'unknown, yes, no, up, down, left, right, on, off, stop, go'.split(
-    ', ')
-CLASS_TO_IDX = {CLASSES[i]: str(i) for i in range(len(CLASSES))}
+# Keyword set for Google Speech Commands v1. Index 0 is reserved for the
+# 'unknown' class (any word not in the 10-command target set)
+KEYWORDS = [
+    'yes', 'no', 'up', 'down', 'left', 'right', 'on', 'off', 'stop', 'go'
+]
+UNKNOWN_TOKEN = '<UNKNOWN>'
+KEYWORD_TO_TOKEN = {kw: '<{}>'.format(kw.upper()) for kw in KEYWORDS}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -42,8 +46,7 @@ if __name__ == '__main__':
             wav_id = '_'.join([keyword, file_name_new])
             file_dir = line.strip()
             f_wav_scp.writelines(wav_id + ' ' + file_dir + '\n')
-            label = CLASS_TO_IDX[
-                keyword] if keyword in CLASS_TO_IDX else CLASS_TO_IDX["unknown"]
-            f_text.writelines(wav_id + ' ' + str(label) + '\n')
+            token = KEYWORD_TO_TOKEN.get(keyword, UNKNOWN_TOKEN)
+            f_text.writelines(wav_id + ' ' + token + '\n')
     f_wav_scp.close()
     f_text.close()

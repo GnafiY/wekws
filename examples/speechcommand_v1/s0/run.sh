@@ -35,6 +35,22 @@ fi
 
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
   echo "Start preparing Kaldi format files"
+  # Build dict for wenet-datapipe CharTokenizer (PR #182). Keep the keyword
+  # index identical to local/prepare_speech_command.py so that labels align.
+  mkdir -p dict
+  echo "<UNKNOWN> 0"  > dict/dict.txt
+  echo "<YES> 1"    >> dict/dict.txt
+  echo "<NO> 2"     >> dict/dict.txt
+  echo "<UP> 3"     >> dict/dict.txt
+  echo "<DOWN> 4"   >> dict/dict.txt
+  echo "<LEFT> 5"   >> dict/dict.txt
+  echo "<RIGHT> 6"  >> dict/dict.txt
+  echo "<ON> 7"     >> dict/dict.txt
+  echo "<OFF> 8"    >> dict/dict.txt
+  echo "<STOP> 9"   >> dict/dict.txt
+  echo "<GO> 10"    >> dict/dict.txt
+  awk '{print $1}' dict/dict.txt > dict/words.txt
+
   for x in train test valid;
   do
     data=data/$x
@@ -76,6 +92,7 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     --num_workers 8 \
     --num_keywords $num_keywords \
     --min_duration 50 \
+    --dict ./dict \
     $cmvn_opts \
     ${checkpoint:+--checkpoint $checkpoint}
 fi
@@ -96,7 +113,8 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
     --test_data data/test/data.list \
     --batch_size 256 \
     --num_workers 8 \
-    --checkpoint $score_checkpoint
+    --dict ./dict \
+    --checkpoint $score_checkpoint > $result_dir/test.log 2>&1
 fi
 
 

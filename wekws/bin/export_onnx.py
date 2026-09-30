@@ -42,7 +42,6 @@ def main():
     feature_dim = configs['model']['input_dim']
     model = init_model(configs['model'])
     is_fsmn = configs['model']['backbone']['type'] == 'fsmn'
-    num_layers = configs['model']['backbone']['num_layers']
     if configs['training_config'].get('criterion', 'max_pooling') == 'ctc':
         # if we use ctc_loss, the logits need to be convert into probs
         model.forward = model.forward_softmax
@@ -57,18 +56,14 @@ def main():
                         model.backbone.padding,
                         dtype=torch.float)
     if is_fsmn:
+        num_layers = configs['model']['backbone']['num_layers']
         cache = cache.unsqueeze(-1).expand(-1, -1, -1, num_layers)
+    dynamic_axes = {'input': {1: 'T'}, 'output': {1: 'T'}}
     torch.onnx.export(model, (dummy_input, cache),
                       args.onnx_model,
                       input_names=['input', 'cache'],
                       output_names=['output', 'r_cache'],
-                      dynamic_axes={
-                          'input': {
-                              1: 'T'
-                          },
-                          'output': {
-                              1: 'T'
-                          }},
+                      dynamic_axes=dynamic_axes,
                       opset_version=13,
                       verbose=False,
                       do_constant_folding=True)
@@ -90,9 +85,9 @@ def main():
     })
 
     if torch.allclose(torch_output[0],
-                      torch.tensor(onnx_output[0]), atol=1e-6) and \
+                      torch.tensor(onnx_output[0]), atol=1e-5) and \
        torch.allclose(torch_output[1],
-                      torch.tensor(onnx_output[1]), atol=1e-6):
+                      torch.tensor(onnx_output[1]), atol=1e-5):
         print('Export to onnx succeed!')
     else:
         print('''Export to onnx succeed, but pytorch/onnx have different

@@ -12,12 +12,11 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 from torch.utils.data import Dataset, DataLoader
 
-torchaudio.set_audio_backend("sox_io")
-
 
 class CollateFunc(object):
     ''' Collate function for AudioDataset
     '''
+
     def __init__(self, feat_dim, feat_type, resample_rate):
         self.feat_dim = feat_dim
         self.resample_rate = resample_rate
@@ -32,18 +31,18 @@ class CollateFunc(object):
             value = item[1].strip().split(",")
             assert len(value) == 3 or len(value) == 1
             wav_path = value[0]
-            sample_rate = torchaudio.backend.sox_io_backend.info(
-                wav_path).sample_rate
+            sample_rate = torchaudio.info(wav_path, backend='sox').sample_rate
             resample_rate = sample_rate
             # len(value) == 3 means segmented wav.scp,
             # len(value) == 1 means original wav.scp
             if len(value) == 3:
                 start_frame = int(float(value[1]) * sample_rate)
                 end_frame = int(float(value[2]) * sample_rate)
-                waveform, sample_rate = torchaudio.backend.sox_io_backend.load(
+                waveform, sample_rate = torchaudio.load(
                     filepath=wav_path,
                     num_frames=end_frame - start_frame,
-                    frame_offset=start_frame)
+                    frame_offset=start_frame,
+                    backend='sox')
             else:
                 waveform, sample_rate = torchaudio.load(item[1])
 
@@ -74,6 +73,7 @@ class CollateFunc(object):
 
 
 class AudioDataset(Dataset):
+
     def __init__(self, data_file):
         self.items = []
         with codecs.open(data_file, 'r', encoding='utf-8') as f:
@@ -106,10 +106,9 @@ if __name__ == '__main__':
 
     with open(args.train_config, 'r') as fin:
         configs = yaml.load(fin, Loader=yaml.FullLoader)
-    feat_dim = configs['dataset_conf']['feature_extraction_conf'][
+    feat_type = configs['dataset_conf']['feats_type']
+    feat_dim = configs['dataset_conf'][f'{feat_type}_conf'][
         'num_mel_bins']
-    feat_type = configs['dataset_conf']['feature_extraction_conf'][
-        'feature_type']
     resample_rate = 0
     if 'resample_conf' in configs['dataset_conf']:
         resample_rate = configs['dataset_conf']['resample_conf'][
